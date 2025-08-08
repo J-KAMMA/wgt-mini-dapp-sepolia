@@ -13,13 +13,13 @@
     button:disabled{opacity:.5;cursor:not-allowed}
     input{padding:10px;border-radius:10px;border:1px solid #bbb;width:100%}
     .muted{color:#666;font-size:.9em}
-    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
     .ok{color:#0a7d32}
     .warn{color:#b85b00}
     .err{color:#b3001b}
     .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#f1f1f1;margin-left:8px}
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.15.0/dist/ethers.min.js"></script>
 </head>
 <body>
   <h1>WGT Mini DApp (Sepolia)</h1>
@@ -115,30 +115,64 @@
   let provider, signer, wgt, acct, decimals=18;
 
   async function ensureNetwork() {
-    const net = await provider.send('eth_chainId', []);
-    const current = parseInt(net, 16);
-    const warn = $("netwarn");
-    if (current !== CHAIN_ID) {
-      warn.style.display = '';
-      try {
-        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xAA36A7' }] });
+    try {
+      const net = await provider.send('eth_chainId', []);
+      const current = parseInt(net, 16);
+      const warn = $("netwarn");
+      if (current !== CHAIN_ID) {
+        warn.style.display = '';
+        try {
+          await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xAA36A7' }] });
+          warn.style.display = 'none';
+          return true;
+        } catch (e) {
+          // チェーン未登録 (4902) → 追加してから再スイッチ
+          if (e && (e.code === 4902 || (typeof e.message === 'string' && e.message.includes('Unrecognized chain')))){
+            try {
+              await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [{
+                  chainId: '0xAA36A7',
+                  chainName: 'Sepolia',
+                  nativeCurrency: { name: 'Sepolia ETH', symbol: 'ETH', decimals: 18 },
+                  rpcUrls: ['https://rpc.sepolia.org'],
+                  blockExplorerUrls: ['https://sepolia.etherscan.io']
+                }]
+              });
+              await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xAA36A7' }] });
+              warn.style.display = 'none';
+              return true;
+            } catch (e2) {
+              console.error(e2);
+              return false;
+            }
+          }
+          console.error(e);
+          return false;
+        }
+      } else {
         warn.style.display = 'none';
         return true;
-      } catch (e) {
-        log("ネットワーク切替が必要です (Sepolia)", 'warn');
-        return false;
       }
-    } else {
-      warn.style.display = 'none';
-      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
     }
   }
 
   async function connect() {
-    if (!window.ethereum) { alert('MetaMask 等のウォレットを入れてください'); return; }
+    if (!window.ethereum) { alert('MetaMask 等のウォレットをインストールしてください'); return; }
     provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send('eth_requestAccounts', []);
-    const ok = await ensureNetwork(); if (!ok) return;
+
+    try {
+      await provider.send('eth_requestAccounts', []);
+    } catch (e){
+      alert('接続が拒否されました。ブラウザのポップアップを許可して、もう一度クリックしてください。');
+      return;
+    }
+
+    const ok = await ensureNetwork(); if (!ok) { log('Sepoliaに切替できませんでした', 'warn'); return; }
+
     signer = await provider.getSigner();
     acct = await signer.getAddress();
     wgt = new ethers.Contract(CONTRACT, ABI, signer);
@@ -147,6 +181,13 @@
     $("who").textContent = acct;
     $("btnRefresh").disabled = false;
     ["btnQuoteBuy","btnBuy","btnQuoteSell","btnSell","btnDelegate"].forEach(id=>$(id).disabled=false);
+
+    // ウォレットアカウント/チェーン変更に追従
+    if (window.ethereum && window.ethereum.on){
+      window.ethereum.on('accountsChanged', () => location.reload());
+      window.ethereum.on('chainChanged', () => location.reload());
+    }
+
     await refresh();
   }
 
