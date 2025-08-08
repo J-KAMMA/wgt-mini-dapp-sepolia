@@ -161,6 +161,7 @@
   }
 
   async function connect() {
+    console.log("connect() called");
     if (!window.ethereum) { alert('MetaMask 等のウォレットをインストールしてください'); return; }
     provider = new ethers.BrowserProvider(window.ethereum);
 
