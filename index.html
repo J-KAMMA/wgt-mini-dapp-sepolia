@@ -27,7 +27,7 @@
 
   <div class="card">
     <div class="row">
-      <button id="btnConnect">ウォレット接続</button>
+      <button id="btnConnect" onclick="connect()">ウォレット接続</button>
       <button id="btnRefresh" disabled>更新</button>
     </div>
     <p>アドレス: <span id="who" class="mono">-</span></p>
@@ -249,6 +249,7 @@
     await refresh();
   }
 
+  window.connect = connect;  // ← 追加（inline onclick から呼べるように）
   $("btnConnect").onclick = connect;
   $("btnRefresh").onclick = refresh;
   $("btnQuoteBuy").onclick = quoteBuy;
