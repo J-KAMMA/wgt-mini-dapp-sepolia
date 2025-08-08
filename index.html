@@ -5,22 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>WGT Mini DApp (Sepolia)</title>
   <style>
-    body{font-family:system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;max-width:900px;margin:24px auto;padding:0 16px}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:900px;margin:24px auto;padding:0 16px}
     .card{border:1px solid #ddd;border-radius:14px;padding:16px;margin:12px 0}
     .row{display:flex;gap:12px;flex-wrap:wrap}
-    .row > *{flex:1 1 260px}
+    .row>*{flex:1 1 260px}
     button{padding:10px 14px;border-radius:10px;border:1px solid #333;background:#111;color:#fff;cursor:pointer}
     button:disabled{opacity:.5;cursor:not-allowed}
     input{padding:10px;border-radius:10px;border:1px solid #bbb;width:100%}
-    .muted{color:#666;font-size:.9em}
-    .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
-    .ok{color:#0a7d32}
-    .warn{color:#b85b00}
-    .err{color:#b3001b}
-    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#f1f1f1;margin-left:8px}
+    .muted{color:#666;font-size:.9em}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .ok{color:#0a7d32}.warn{color:#b85b00}.err{color:#b3001b}.pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#f1f1f1;margin-left:8px}
   </style>
-  <!-- ethers を defer で読み込み（DOMContentLoaded 後に評価） -->
-  <script defer src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.min.js"></script>
 </head>
 <body>
   <h1>WGT Mini DApp (Sepolia)</h1>
@@ -28,8 +22,7 @@
 
   <div class="card">
     <div class="row">
-      <!-- inline onclick でも呼べるようにする（保険） -->
-      <button id="btnConnect" onclick="connect()">ウォレット接続</button>
+      <button id="btnConnect">ウォレット接続</button>
       <button id="btnRefresh" disabled>更新</button>
     </div>
     <p>アドレス: <span id="who" class="mono">-</span></p>
@@ -56,7 +49,7 @@
       <button id="btnQuoteBuy" disabled>見積 (quoteBuy)</button>
       <button id="btnBuy" disabled>購入 (buy)</button>
     </div>
-    <p class="muted">手数料: コントラクト設定に基づく（現在 1%）。購入時は <b>grossETH + feeETH</b> を自動で value に送ります。</p>
+    <p class="muted">手数料はコントラクト設定（現在 1%）。購入時は <b>grossETH + feeETH</b> を value に送ります。</p>
   </div>
 
   <div class="card">
@@ -77,7 +70,7 @@
       <button id="btnQuoteSell" disabled>見積 (quoteSell)</button>
       <button id="btnSell" disabled>売却 (sell)</button>
     </div>
-    <p class="muted">※ 売却にはコントラクトのリザーブが必要。フロア未満になる売りは失敗します。</p>
+    <p class="muted">※ リザーブ不足やフロア割れの売りは失敗します。</p>
   </div>
 
   <div class="card">
@@ -85,7 +78,7 @@
     <div class="row">
       <button id="btnDelegate" disabled>自己委任</button>
     </div>
-    <p class="muted">Votes は保有量とは別。<b>delegate(自分のアドレス)</b> で有効化されます。</p>
+    <p class="muted">Votes は保有量とは別。<b>delegate(自分のアドレス)</b> で有効化。</p>
   </div>
 
   <div class="card">
@@ -93,186 +86,7 @@
     <pre id="log" class="mono" style="white-space:pre-wrap"></pre>
   </div>
 
-<script>
-// DOM 準備後に初期化
-window.addEventListener('DOMContentLoaded', () => {
-  try {
-    if (document.getElementById('btnConnect')) document.getElementById('btnConnect').onclick = connect;
-    if (document.getElementById('btnRefresh')) document.getElementById('btnRefresh').onclick = refresh;
-    if (document.getElementById('btnQuoteBuy')) document.getElementById('btnQuoteBuy').onclick = quoteBuy;
-    if (document.getElementById('btnBuy')) document.getElementById('btnBuy').onclick = doBuy;
-    if (document.getElementById('btnQuoteSell')) document.getElementById('btnQuoteSell').onclick = quoteSell;
-    if (document.getElementById('btnSell')) document.getElementById('btnSell').onclick = doSell;
-    if (document.getElementById('btnDelegate')) document.getElementById('btnDelegate').onclick = doDelegate;
-  } catch(e){ console.error(e); }
-});
-
-(async () => {
-  const CONTRACT = "0xa814146ccE08EC174eC7A5ad05e8C350376f5A92";
-  const CHAIN_ID = 11155111; // Sepolia
-  const ABI = [
-    "function decimals() view returns (uint8)",
-    "function balanceOf(address) view returns (uint256)",
-    "function totalSupply() view returns (uint256)",
-    "function getVotes(address) view returns (uint256)",
-    "function delegates(address) view returns (address)",
-    "function delegate(address)",
-    "function quoteBuy(uint256) view returns (uint256 grossETH, uint256 feeETH)",
-    "function quoteSell(uint256) view returns (uint256 grossETH, uint256 feeETH)",
-    "function buy(uint256 amount, uint256 maxCostETH) payable",
-    "function sell(uint256 amount, uint256 minPayoutETH)",
-    "function owner() view returns (address)"
-  ];
-
-  const $ = (id) => document.getElementById(id);
-  const log = (m, cls) => { const el = $("log"); const line = document.createElement("div"); if(cls) line.className = cls; line.textContent = (new Date()).toLocaleTimeString()+"  "+m; el.prepend(line); };
-
-  let provider, signer, wgt, acct, decimals=18;
-
-  async function ensureNetwork() {
-    try {
-      const net = await provider.send('eth_chainId', []);
-      const current = parseInt(net, 16);
-      const warn = $("netwarn");
-      if (current !== CHAIN_ID) {
-        warn.style.display = '';
-        try {
-          await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xAA36A7' }] });
-          warn.style.display = 'none';
-          return true;
-        } catch (e) {
-          if (e && (e.code === 4902 || (typeof e.message === 'string' && e.message.includes('Unrecognized chain')))){
-            try {
-              await window.ethereum.request({
-                method: 'wallet_addEthereumChain',
-                params: [{
-                  chainId: '0xAA36A7',
-                  chainName: 'Sepolia',
-                  nativeCurrency: { name: 'Sepolia ETH', symbol: 'ETH', decimals: 18 },
-                  rpcUrls: ['https://rpc.sepolia.org'],
-                  blockExplorerUrls: ['https://sepolia.etherscan.io']
-                }]
-              });
-              await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xAA36A7' }] });
-              warn.style.display = 'none';
-              return true;
-            } catch (e2) {
-              console.error(e2);
-              return false;
-            }
-          }
-          console.error(e);
-          return false;
-        }
-      } else {
-        warn.style.display = 'none';
-        return true;
-      }
-    } catch (e) {
-      console.error(e);
-      return false;
-    }
-  }
-
-  async function connect() {
-    console.log('connect() called');
-    if (!window.ethereum) { alert('MetaMask 等のウォレットをインストールしてください'); return; }
-    provider = new ethers.BrowserProvider(window.ethereum);
-
-    try {
-      await provider.send('eth_requestAccounts', []);
-    } catch (e){
-      alert('接続が拒否されました。ブラウザのポップアップを許可して、もう一度クリックしてください。');
-      return;
-    }
-
-    const ok = await ensureNetwork(); if (!ok) { log('Sepoliaに切替できませんでした', 'warn'); return; }
-
-    signer = await provider.getSigner();
-    acct = await signer.getAddress();
-    wgt = new ethers.Contract(CONTRACT, ABI, signer);
-    try { decimals = await wgt.decimals(); } catch {}
-
-    $("who").textContent = acct;
-    $("btnRefresh").disabled = false;
-    ["btnQuoteBuy","btnBuy","btnQuoteSell","btnSell","btnDelegate"].forEach(id=>$(id).disabled=false);
-
-    if (window.ethereum && window.ethereum.on){
-      window.ethereum.on('accountsChanged', () => location.reload());
-      window.ethereum.on('chainChanged', () => location.reload());
-    }
-
-    await refresh();
-  }
-  // inline onclick から呼べるように
-  window.connect = connect;
-
-  async function refresh() {
-    if (!provider) return;
-    const ethBal = await provider.getBalance(acct);
-    const w = await wgt.balanceOf(acct);
-    const v = await wgt.getVotes(acct);
-    const ts = await wgt.totalSupply();
-    const res = await provider.getBalance(CONTRACT);
-    $("eth").textContent = ethers.formatEther(ethBal);
-    $("wgt").textContent = ethers.formatUnits(w, decimals);
-    $("votes").textContent = ethers.formatUnits(v, decimals);
-    $("supply").textContent = ethers.formatUnits(ts, decimals);
-    $("reserve").textContent = ethers.formatEther(res);
-  }
-
-  async function quoteBuy() {
-    const amt = $("buyAmt").value.trim() || "0";
-    const n = ethers.parseUnits(amt, decimals);
-    const [gross, fee] = await wgt.quoteBuy(n);
-    const total = gross + fee;
-    $("buyQuote").value = ethers.formatEther(total) + ` ETH (内 fee ${ethers.formatEther(fee)} ETH)`;
-    return { n, gross, fee, total };
-  }
-  async function doBuy() {
-    const { n, total } = await quoteBuy();
-    const max = total * 101n / 100n; // +1%スリッページ
-    const tx = await wgt.buy(n, max, { value: total });
-    log(`buy 送信: ${tx.hash}`);
-    const rc = await tx.wait();
-    log(`buy 成功: block ${rc.blockNumber}`, 'ok');
-    await refresh();
-  }
-
-  async function quoteSell() {
-    const amt = $("sellAmt").value.trim() || "0";
-    const n = ethers.parseUnits(amt, decimals);
-    const [gross, fee] = await wgt.quoteSell(n);
-    const net = gross - fee;
-    $("sellQuote").value = ethers.formatEther(net) + ` ETH (fee ${ethers.formatEther(fee)} ETH)`;
-    return { n, gross, fee, net };
-  }
-  async function doSell() {
-    const { n, net } = await quoteSell();
-    const min = net * 99n / 100n; // -1% スリッページ許容
-    const tx = await wgt.sell(n, min);
-    log(`sell 送信: ${tx.hash}`);
-    const rc = await tx.wait();
-    log(`sell 成功: block ${rc.blockNumber}`, 'ok');
-    await refresh();
-  }
-
-  async function doDelegate() {
-    const tx = await wgt.delegate(acct);
-    log(`delegate 送信: ${tx.hash}`);
-    const rc = await tx.wait();
-    log(`delegate 成功: block ${rc.blockNumber}`, 'ok');
-    await refresh();
-  }
-
-  // 他の関数も必要なら window へ公開
-  window.refresh = refresh;
-  window.quoteBuy = quoteBuy;
-  window.doBuy = doBuy;
-  window.quoteSell = quoteSell;
-  window.doSell = doSell;
-  window.doDelegate = doDelegate;
-})();
-</script>
+  <!-- ESMモジュール（CSP: unsafe-eval 不要） -->
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
